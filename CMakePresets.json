@@ -1,0 +1,37 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "thbr-c6-usb",
+      "displayName": "THBR C6 – USB/TAP baseline",
+      "description": "Known-good original THBR build with Border Router and BLE proxy",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-thbr-c6",
+      "cacheVariables": {
+        "IDF_TARGET": "esp32c6",
+        "SDKCONFIG": "${sourceDir}/sdkconfig.ble",
+        "SDKCONFIG_DEFAULTS": "${sourceDir}/sdkconfig.defaults;${sourceDir}/sdkconfig.defaults.br;${sourceDir}/sdkconfig.defaults.ble"
+      },
+      "vendor": {
+        "espressif/vscode-esp-idf": {
+          "schemaVersion": 1,
+          "settings": [
+            {
+              "type": "flashBaudRate",
+              "value": "460800"
+            },
+            {
+              "type": "monitorBaudRate",
+              "value": "115200"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
