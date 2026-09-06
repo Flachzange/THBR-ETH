@@ -1,234 +1,281 @@
-# THBR — a Thread border router on a stick
+# THBR-ETH — a standalone Thread Border Router over Ethernet
 
-The whole border router runs on an ESP32-C6. It reaches the host through the
-chip's own USB port, which the host side turns into a network interface. There
-is no radio co-processor on the host, no Ethernet chip on the stick, and no
-Spinel link that stops working when a host process restarts.
+THBR-ETH is a fork of [tostmann/THBR](https://github.com/tostmann/THBR)
+that adds a physical W5500 Ethernet backbone to the ESP32-C6 firmware. The
+target hardware is an ESP32-C6-Bug with an Eth-Bug-PoE board.
 
-Because the border router lives on the stick, the Thread network survives what
-happens on the host: restarting Home Assistant, updating the add-on, recreating
-the container. The mesh keeps running; only the path to it pauses.
+Most of this repository originates in the upstream THBR project: the original
+ESP32-C6 Border Router firmware, the USB/TAP and PPP transports, the Home
+Assistant add-on, Docker integration, BLE proxy and FHEM worked example were
+designed and implemented there. This fork preserves that work and its Git
+history. Its own scope is the W5500/Eth-Bug-PoE backbone, the associated build
+profiles and standalone startup path, and the Ethernet/OMR diagnostics needed
+to validate that configuration.
 
-The stick also lends its Bluetooth radio to the Matter server, so a machine
-with no Bluetooth of its own can still commission a Matter device.
+The complete OpenThread Border Router runs on the ESP32-C6. Ethernet and PoE
+make it independent of Home Assistant, Docker, a TAP device or a permanently
+connected USB host. USB remains available for building, flashing and the
+diagnostic console.
 
-Runs as a **Home Assistant add-on** or as a **plain Docker container** next to
-Home Assistant. Both are built from the same directory.
+The original USB/TAP and PPP transports are still present in the repository.
+The W5500 profile is the primary configuration documented here.
 
-![The add-on's page in Home Assistant: state of stick and network, and the mesh topology](images/haos.png)
+## Current status
 
-## What it does
+The W5500 implementation has been built with ESP-IDF 6.0.2 and tested on real
+ESP32-C6-Bug + Eth-Bug-PoE hardware:
 
-- **Border routing** — the stick forms or joins a Thread network, advertises a
-  route to it, and the host reaches Thread devices over IPv6.
-- **Matter over Thread** — Home Assistant discovers the router, imports the
-  network, and commissions devices through it. Firmware updates for those
-  devices flow through it too.
-- **Commissioning over Bluetooth** — a Matter device is first talked to over
-  Bluetooth LE, before it has ever seen the Thread network. Servers, NUCs and
-  older machines often have no Bluetooth at all. The stick has, and it offers
-  that radio to the Matter server: the server drives the scan, the connection
-  and the exchange, and the stick carries them. Nothing to set up beyond
-  switching the Matter server's own `ble_proxy` option on — the stick dials in
-  and announces itself.
-- **A page in the sidebar** — firmware on the stick against the one the add-on
-  carries, border routing state, memory, the route into the mesh and whether
-  anything answers through it, plus a graph of the mesh you can pull around.
-- **Two buttons that used to need a shell** — write the bundled firmware to the
-  stick over its USB port, and restart the stick.
-- **Save the network settings** — the stick's Thread credentials, in a file
-  Home Assistant backups carry. Restoring it onto a replacement stick moves the
-  network to new hardware without re-commissioning a single device.
+- W5500 link, DHCP, IPv4 and IPv6 work.
+- The OpenThread Border Router reaches `br=running` and the Thread role
+  `leader`.
+- The Border Routing Manager advertises an OMR route into the infrastructure
+  LAN.
+- An OMR address on the ESP32-C6 is reachable from a Windows host over IPv6.
+- The web/REST service and the diagnostic API are reachable over Ethernet.
+- USB-Serial/JTAG remains attached as a diagnostic console.
 
-![The mesh graph on that page: seventeen routers and one child](images/topology.png)
+End-to-end commissioning of a real Thread/Matter device is the next functional
+test and is not claimed as completed yet.
 
-The graph is the fastest answer to "is the mesh healthy?": every mains-powered
-device is a router and carries traffic for the rest, line weight is the link
-quality between two of them, a dashed line is a child hanging off its parent,
-and the ring marks the leader.
-
-## Requirements
-
-- An ESP32-C6 with 4 MB flash, connected by its **native USB port**
-  (USB-Serial/JTAG). Firmware for the **ESP32-C5** ships alongside it and the
-  add-on writes whichever matches the chip it finds — but the C6 is what the
-  Bluetooth work was measured on, and the C5 carries a caveat described in
-  [`addon/DOCS.md`](addon/DOCS.md). The ESP32-H2 cannot run this: Espressif
-  ships no border-router library for it.
-- Home Assistant OS or Supervised, or Home Assistant in Docker on a host you
-  control.
-
-## Install on Home Assistant
-
-Home Assistant OS or Supervised. The Supervisor pulls a published image, so
-this takes seconds rather than a build on your machine.
-
-1. **Add this repository.** *Settings → Apps → App store → ⋮ → Repositories*,
-   paste `https://github.com/tostmann/THBR`, **Add**. (Older versions call
-   these Add-ons, as do the Supervisor's API and this project's own files.)
-
-   The Supervisor clones the repository without credentials, so this works
-   only while it is readable without logging in. From a private copy, install
-   from a local one instead: put the contents of `addon/` into `/addons/thbr/`
-   on the machine — over the *Samba share* or *Advanced SSH & Web Terminal*
-   app, or any other route to that directory — and it appears under **Local
-   apps** after *⋮ → Check for updates*. Everything below is the same either
-   way.
-2. **Install** *THBR Thread Border Router*, which now appears in the store
-   under a heading of the same name.
-3. **Choose the stick.** On its *Configuration* tab, pick the ESP32-C6
-   under `device` — it is listed as *Espressif USB JTAG/serial debug unit*.
-   Leave `flash` at `auto`. Save.
-
-   With more than one USB device on the machine, make the stick identify
-   itself: **plug it in last**, deliberately, right before this step. The
-   add-on lists the ports it can see newest first and says how long ago each
-   appeared, so the stick is the one at the top. After a reboot that ordering
-   says nothing — every port is created within the same second at boot — so
-   **unplug the stick and plug it back in** to make it the newest again.
-
-   Picking the wrong one is not destructive: nothing is written to a port
-   before it has been asked which chip it is and which application it carries,
-   and an application this add-on did not build is never overwritten unasked.
-   [Choosing the right port](addon/DOCS.md#choosing-the-right-port) has the
-   detail.
-4. **Start it** and watch the log. A stick that answers nothing is flashed
-   first, which takes about a minute; lines prefixed `[stick]` come from the
-   firmware itself. `br=running` means border routing is up.
-5. **Give Home Assistant the interface.** *Settings → System → Network →
-   Network adapter*: enable your normal adapter **and** `tap0`, then restart
-   Home Assistant. It binds its discovery sockets per interface when it starts,
-   so without `tap0` among them nothing that announces itself across the
-   backbone reaches it — the router's own announcement, and the Matter devices
-   behind it.
-6. **Add the router.** *Settings → Devices & services → Add integration →
-   Open Thread Border Router*, and give it `http://192.168.45.2` — the stick's
-   address on the backbone, the `stick_addr` option if you changed it. Home
-   Assistant then imports the Thread network from it, and Matter devices are
-   commissioned as usual.
-
-   It has to be typed in: Home Assistant discovers border routers over mDNS,
-   and this router does announce itself there — but that discovery feeds the
-   *Thread* integration, which lists routers. The *Open Thread Border Router*
-   integration, the one that actually reads and writes the network, carries no
-   mDNS discovery at all; it is set up automatically only for Home Assistant's
-   own border-router add-on.
-
-The add-on then has its own page in the sidebar, **Thread BR**: state of stick
-and network, a graph of the mesh you can pull around, and the buttons for
-firmware, restart and network settings. What each option does, and what to do
-when a step above does not produce what it says, is in
-[`addon/DOCS.md`](addon/DOCS.md).
-
-## Install with Docker
-
-For Home Assistant in a container of your own. The image is on Docker Hub as
-[`tostmann/thbr`](https://hub.docker.com/r/tostmann/thbr), multi-arch for
-`arm64` and `amd64`:
+## Architecture
 
 ```
-docker pull tostmann/thbr
+Infrastructure LAN
+       │
+       │ Ethernet / IPv4 / IPv6
+       │
+    W5500  ←── PoE
+       │ SPI
+       │
+  ESP32-C6-Bug                   optional USB connection
+  OpenThread Border Router  ←──  build, flash and console only
+       │
+       │ IEEE 802.15.4 / Thread
+       │
+  Thread devices
 ```
 
-Take the `thbr` service from [`addon/compose.yaml`](addon/compose.yaml), point
-`THBR_DEVICE` at your stick's `/dev/serial/by-id/…` path, and start it. Then do
-step 5 and 6 above — they are the same for both ways of running it.
-[`addon/README.md`](addon/README.md) has the details, including what the
-container needs from the host and why.
+The ESP32-C6 routes between the physical Ethernet interface and the Thread
+mesh. A Matter server or other Matter controller is a separate application on
+the infrastructure network; it is not part of the border-router firmware.
 
-## Matter without Home Assistant
+## Hardware
 
-The border router carries IPv6 into the Thread mesh; Matter itself is spoken by
-a Matter server, and that server runs perfectly well without Home Assistant.
-Two things are worth knowing before choosing one.
+- ESP32-C6-Bug with ESP32-C6FH4 and 4 MB flash
+- Eth-Bug-PoE with W5500 SPI Ethernet controller
+- Ethernet connection to the infrastructure LAN
+- PoE supply through the Eth-Bug-PoE board
+- USB connection only when building, flashing or diagnosing
 
-**Which server.** Commissioning over the stick's Bluetooth radio needs a server
-that accepts a proxy radio. `ghcr.io/matter-js/matterjs-server:stable` does,
-started with `--ble-proxy`. `ghcr.io/home-assistant-libs/python-matter-server`
-does not — its greeting reports no proxy support, and the stick's offer is
-turned away. If the add-on finds a server on the address the stick dials, it
-says which of the two it is rather than leaving you to guess.
+### W5500 pin assignment
 
-**Where it listens.** The stick dials `192.168.45.1:5580`, the host end of its
-own backbone. A server published on every interface already covers that, and
-the stick reaches it directly. Only when the server is reachable on loopback
-alone — which is what Home Assistant does — does the add-on forward.
+| Signal | ESP32-C6 GPIO |
+| --- | ---: |
+| MISO | 2 |
+| Interrupt | 4 |
+| Chip select | 5 |
+| SCLK | 6 |
+| MOSI | 7 |
+| Reset | not connected (`-1`) |
 
-Pairing then happens in the server's own web page on that port: it takes the
-pairing code and drives the commissioning, and the Bluetooth for it comes from
-the stick.
+The configured SPI clock is 20 MHz. The DHCP hostname is `thbr-eth`.
 
-For **FHEM**, [`fhem/README.md`](fhem/README.md) walks the whole way from a
-factory-new IKEA device to the point where FHEM takes over: the stick, the
-Matter server, the Thread credentials it needs, and the pairing itself. The
-FHEM side beyond that — devices, readings, switches — is
-[fhem-matter](https://gitlab.com/zeppelin1979/fhem-matter), which talks to the
-same server.
+## Backbone transports
 
-## How it fits together
+Exactly one backbone implementation is compiled into a firmware image.
 
-```
-Home Assistant ─ Matter server ─┐
-                                │  tap0   (an interface on the host)
-                          add-on / container
-                                │  SLIP over CDC-ACM
-                            ESP32-C6      (border router, on the chip)
-                             │         │
-                    802.15.4 │         │ Bluetooth LE
-                             │         │
-                  Thread devices       a device being commissioned
-```
+| Transport | Purpose | Permanent host required |
+| --- | --- | --- |
+| W5500 SPI Ethernet | Standalone physical Ethernet router | No |
+| Ethernet over USB/TAP | Original THBR deployment with host TAP | Yes |
+| PPP over USB | Point-to-point control/data transport | Yes |
 
-The backbone between host and stick is a private point-to-point link
-(`192.168.45.0/24` by default) and does not touch your LAN. The stick answers
-there with an ot-br-posix-compatible REST API and reports its own state on a
-second port.
+The Matter BLE proxy inherited from THBR is disabled in the W5500 profiles.
+It remains part of the original USB/TAP configuration. Matter commissioning
+with the W5500 build therefore needs a controller with its own suitable
+commissioning path, for example Bluetooth available to the Matter controller.
 
-The Bluetooth path runs over the same backbone. The Matter server offers a
-websocket endpoint for a proxy radio, and the stick dials it: the server sends
-scan and connect commands, the stick answers with what its radio finds, and the
-commissioning exchange crosses in binary frames. On Home Assistant the Matter
-server publishes its port on the loopback interface only, which the stick — a
-hop away on the tap — cannot reach, so the add-on listens on the host end of
-the backbone and forwards. `THBR_MATTER_ADDR` says where to forward to and
-switches the whole thing off when empty.
+## Build requirements
 
-## Building it yourself
+The tested development environment is:
 
-```
-THBR_STAGE=2 THBR_VARIANT=ble scripts/build.sh                  # C6 firmware, the one that ships
-THBR_BUILD_DIR=/root/thbr_idf_build_ble scripts/dist.sh          # file it under addon/firmware/esp32c6/
-THBR_STAGE=2 THBR_VARIANT=c5 THBR_NO_BUMP=1 scripts/build.sh    # C5, same firmware version
-THBR_BUILD_DIR=/root/thbr_idf_build_c5 scripts/dist.sh
-docker build -t thbr addon/                                     # the container image
-```
+- Windows 11
+- ESP-IDF 6.0.2
+- Espressif VS Code extension 2.2.0
+- VS Code C/C++ extension 1.33.8
+- CMake 4.0.3
+- Ninja 1.12.0
+- Git for Windows 2.55.0
+- build target `esp32c6`
 
-`sdkconfig.defaults` is layered: `.br` turns the border router on, `.ble` adds
-the Bluetooth proxy, `.c5` retargets the same sources at an ESP32-C5. The
-variant is not optional: without `THBR_VARIANT=ble` the build succeeds, comes
-out a third smaller and carries no Bluetooth stack at all, and nothing but the
-file size says so. Build once per chip; `THBR_NO_BUMP=1` keeps the second chip
-on the first one's version number, and `scripts/dist.sh` files each build
-under its own chip, so the add-on picks the one matching the stick in front of
-it. `THBR_VARIANT=heap` is the C6 build plus a heap census endpoint
-(`sdkconfig.defaults.heap`) — an investigation build, never shipped.
+The component manifest requires ESP-IDF 6.0 or newer. Hardware validation was
+performed specifically with ESP-IDF 6.0.2.
 
-Publishing a release builds both architectures natively and pushes them under
-the version in `addon/config.yaml`:
+## Build profiles
+
+`CMakePresets.json` contains an existing USB/TAP baseline and two W5500
+profiles:
+
+| Preset | Configuration |
+| --- | --- |
+| USB/TAP baseline | Original THBR build with Border Router and BLE proxy |
+| `thbr-c6-w5500-stage1` | W5500 link and DHCP; Border Router disabled |
+| `thbr-c6-w5500-stage2` | W5500 plus OpenThread Border Router |
+
+Stage 1 isolates Ethernet bring-up from OpenThread. Stage 2 is the standalone
+border-router firmware.
+
+The W5500 profiles layer these files:
 
 ```
-THBR_REMOTE_HOST=user@other-arch-host scripts/publish_images.sh
+Stage 1: sdkconfig.defaults + sdkconfig.defaults.w5500
+Stage 2: sdkconfig.defaults + sdkconfig.defaults.w5500 + sdkconfig.defaults.br
 ```
 
-`scripts/idf_env.sh` sets up the toolchain and is host-specific; it is not part
-of the repository.
+The generated `sdkconfig.w5500-stage1` and `sdkconfig.w5500-stage2` files and
+their build directories are local build output and are ignored by Git.
+
+## Building and flashing with VS Code
+
+1. Open the repository in a VS Code window with the ESP-IDF 6.0.2 environment
+   active.
+2. Select `thbr-c6-w5500-stage1` for Ethernet-only bring-up or
+   `thbr-c6-w5500-stage2` for the complete Border Router.
+3. Configure the selected CMake preset.
+4. Build the project.
+5. Flash the resulting image with the ESP-IDF extension.
+6. Open the serial monitor at 115200 baud.
+
+The flash baud rate in the presets is 460800 baud. The serial port depends on
+the connected machine and must not be assumed to remain `COM7`.
+
+The presets are intended to be selected through VS Code/CMake. When building
+from a command line, use an explicit build directory and the same `SDKCONFIG`
+and `SDKCONFIG_DEFAULTS` values instead of relying on `idf.py --preset`.
+
+## Expected runtime behaviour
+
+After Ethernet starts, the log reports the W5500 pin assignment, link state,
+MAC address and DHCP lease. A Stage 1 build stops after bringing up the
+backbone.
+
+With Stage 2, `br=stopped role=detached` is normal directly after boot. On the
+tested hardware the router consistently reached `br=running role=leader` after
+approximately 20 seconds.
+
+The diagnostic API listens on port 8082. For example:
+
+```
+http://<DHCP-address>:8082/status
+```
+
+A healthy Stage 2 response resembles:
+
+```json
+{"fw":"0.1.46","uptime_s":295,"heap":353640,"heap_min":353184,"link":"up","br":"running","role":"leader"}
+```
+
+The OpenThread web/REST service uses the normal HTTP service on the device's
+DHCP address.
+
+## IPv6 and OMR routing
+
+OpenThread distinguishes between addresses intended for the Thread mesh and
+addresses reachable from the infrastructure LAN:
+
+- The favored OMR prefix is advertised into the infrastructure network. Hosts
+  on that network learn a route to it through the Border Router.
+- Mesh-local addresses belong to the Thread mesh and are not advertised as an
+  infrastructure route.
+- Link-local addresses are valid only on their respective link.
+
+The firmware asks OpenThread for the favored OMR prefix and classifies its
+addresses accordingly. It does not infer address roles from a hard-coded ULA
+prefix.
+
+On the tested network, Windows learned a route for
+`fd8b:eee7:2f81:1::/64` through the ESP32-C6's Ethernet link-local address, and
+the OMR address `fd8b:eee7:2f81:1:4a06:b13:ec90:a4bb` answered with roughly
+2 ms latency. These values are network-specific examples, not fixed project
+configuration.
+
+Useful Windows checks are:
+
+```powershell
+Get-NetRoute -AddressFamily IPv6 |
+    Where-Object { $_.DestinationPrefix -match "^fd" }
+
+ping -6 <OMR-address-reported-by-THBR>
+```
+
+Failure to find a LAN route to a mesh-local prefix is expected and is not a
+Border Router fault.
+
+## Important lwIP/OTBR compatibility setting
+
+For the W5500 profiles, `CONFIG_LWIP_PPP_SUPPORT` must be disabled.
+
+ESP-IDF 6.0.2 supplies the OpenThread Border Router implementation as a
+prebuilt library. Enabling lwIP PPP support changes the layout of lwIP's
+`struct netif`, while the prebuilt OTBR library expects the layout without the
+PPP client-data pointer. The resulting ABI mismatch makes OTBR read the wrong
+infrastructure interface index and produces errors such as:
+
+```
+Invalid If index
+Failed to get LL address
+```
+
+`sdkconfig.defaults.w5500` therefore sets:
+
+```
+CONFIG_LWIP_PPP_SUPPORT=n
+```
+
+The component CMake file also stops a W5500 build if PPP support is enabled,
+so an incompatible firmware cannot be produced silently.
+
+## Known harmless log messages
+
+The following messages have been observed without affecting Border Router
+operation:
+
+- `IPv6 multicast is always filtered in by W5500` is driver information.
+- Occasional `Dropping unsupported mldv2 record of type 2/6` messages are
+  caused by MLDv2 traffic on the infrastructure LAN.
+
+They require no action while the router remains `br=running` and the OMR route
+and address are reachable.
+
+## Original USB/TAP deployment
+
+The Home Assistant add-on, Docker container and FHEM worked example are
+inherited from the original THBR project and describe its USB/TAP backbone and
+BLE-proxy architecture:
+
+- [`addon/README.md`](addon/README.md)
+- [`addon/DOCS.md`](addon/DOCS.md)
+- [`fhem/README.md`](fhem/README.md)
+
+Those documents do not currently describe the standalone W5500 profile. Use
+the W5500 build and network instructions in this README for THBR-ETH.
+
+## Project origin and development branch
+
+- Upstream project: <https://github.com/tostmann/THBR>
+- THBR-ETH fork: <https://github.com/Flachzange/THBR-ETH>
+- W5500 development branch: `feature/w5500-backbone`
+
+The W5500 changes are developed in separate Stage 1 and Stage 2 steps, built
+locally and validated on the physical hardware before they are committed and
+pushed.
 
 ## Licence
 
 **PolyForm Noncommercial License 1.0.0** — free for anything that is not
 commercial. See [LICENSE](LICENSE).
 
-The components this builds on keep their own licences, which these terms do not
-narrow: OpenThread under BSD-3-Clause, the Espressif components under
+The components this builds on keep their own licences, which these terms do
+not narrow: OpenThread under BSD-3-Clause, the Espressif components under
 Apache-2.0, cJSON under MIT, and esptool — shipped unmodified and run as a
 separate program — under GPL-2.0-or-later. [NOTICE](NOTICE) lists them.
