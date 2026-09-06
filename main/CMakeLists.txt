@@ -1,32 +1,42 @@
 # Exactly one backbone transport is compiled (see main/backbone.h).
+set(THBR_EXTRA_SRC)
+
 if(CONFIG_THBR_TRANSPORT_TAP)
     set(THBR_TRANSPORT_SRC "eth_link.c")
-else()
+    list(APPEND THBR_EXTRA_SRC "p2p_netif_glue.c")
+elseif(CONFIG_THBR_TRANSPORT_PPP)
     set(THBR_TRANSPORT_SRC "ppp_link.c")
+    list(APPEND THBR_EXTRA_SRC "p2p_netif_glue.c")
+elseif(CONFIG_THBR_TRANSPORT_W5500)
+    set(THBR_TRANSPORT_SRC "w5500_link.c")
+else()
+    # During ESP-IDF's early requirements pass, project Kconfig values are
+    # not available yet. Use a harmless fallback for that pass.
+    set(THBR_TRANSPORT_SRC "ppp_link.c")
+    list(APPEND THBR_EXTRA_SRC "p2p_netif_glue.c")
+endif()
+
+# ESP-IDF 6.0.2 ships OTBR as a prebuilt library. Its lwIP struct netif ABI
+# assumes PPP is disabled; PPP adds a client-data pointer before netif->num and
+# makes OTBR mistake Ethernet's hwaddr_len (6) for interface number 6 (index 7).
+if(CONFIG_THBR_TRANSPORT_W5500 AND CONFIG_LWIP_PPP_SUPPORT)
+    message(FATAL_ERROR
+        "W5500 OTBR requires CONFIG_LWIP_PPP_SUPPORT=n (lwIP/OTBR ABI mismatch)")
 endif()
 
 idf_component_register(
-    SRCS         "thbr_main.c" ${THBR_TRANSPORT_SRC} "log_sink.c" "p2p_netif_glue.c"
-                 "info_server.c" "ble_proxy.c" "heap_probe.c"
+    SRCS         "thbr_main.c" ${THBR_TRANSPORT_SRC} ${THBR_EXTRA_SRC}
+                 "log_sink.c" "info_server.c" "ble_proxy.c" "heap_probe.c"
     INCLUDE_DIRS "."
-    ## openthread   — OT stack, border-router API (prebuilt libopenthread_br.a)
-    ## esp_netif    — the PPP backbone netif
-    ## esp_driver_usb_serial_jtag — PPP's serial backend
-    ## espressif__mdns — MeshCoP/SRP advertising on the backbone
-    ## vfs          — esp_vfs_eventfd_register
-    PRIV_REQUIRES openthread esp_netif esp_event esp_driver_usb_serial_jtag bt
+    PRIV_REQUIRES openthread esp_netif esp_event esp_eth
+                  esp_driver_spi esp_driver_gpio esp_driver_usb_serial_jtag bt
                   espressif__mdns nvs_flash vfs lwip esp_hw_support spi_flash
                   spiffs espressif__esp_ot_br_server esp_http_server esp_timer
                   espressif__cjson espressif__esp_websocket_client mbedtls
-    ## WHOLE_ARCHIVE: __wrap_esp_netif_get_mac (p2p_netif_glue.c) is referenced
-    ## only from libopenthread_br.a, which the linker processes AFTER libmain.a
-    ## — without this the wrap ends up undefined at link time even though it is
-    ## compiled.
     WHOLE_ARCHIVE
 )
 
-# Intercept esp_netif_get_mac so the point-to-point backbone can answer
-# OpenThread's infra-interface link-layer-address query with a synthetic MAC.
-# See main/p2p_netif_glue.c for why this is a link-time wrap and NOT an edit to
-# the shared framework-espidf tree.
-target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_netif_get_mac")
+# Only the point-to-point USB transports need the synthetic-MAC wrapper.
+if(NOT CONFIG_THBR_TRANSPORT_W5500)
+    target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_netif_get_mac")
+endif()

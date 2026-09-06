@@ -1,7 +1,7 @@
 /*
  * The border router's backbone link, whichever transport carries it.
  *
- * Two implementations select on CONFIG_THBR_TRANSPORT_* (main/CMakeLists.txt
+ * Three implementations select on CONFIG_THBR_TRANSPORT_* (main/CMakeLists.txt
  * compiles exactly one):
  *
  *   ppp_link.c  PPP over USB-Serial/JTAG.  Carries IP perfectly well, but the
@@ -16,6 +16,10 @@
  *               with a MAC and a broadcast domain, which is what the border
  *               router expects — and what HAOS can run, since it ships
  *               CONFIG_TUN=y but no kernel PPP on x86_64.
+ *
+ *   w5500_link.c  Physical SPI Ethernet on the ESP32-C6-Bug Eth-Bug-PoE
+ *                 shield. DHCP and IPv6 run directly on the ESP, while USB
+ *                 remains the diagnostic console.
  */
 
 #pragma once
@@ -42,16 +46,14 @@ esp_err_t backbone_wait_up(uint32_t timeout_ms);
 /* The netif to hand to esp_openthread_set_backbone_netif(). */
 esp_netif_t *backbone_netif(void);
 
-/* Host-side IPv4 address, 0 until up — the UDP log sink sends there. */
+/* Fixed host peer for point-to-point links; zero on a switched LAN. */
 uint32_t backbone_peer_ipv4(void);
 
 /* Announce the backbone's address as an IP_EVENT_ETH_GOT_IP.
  *
- * A DHCP-configured Ethernet netif posts this itself; ours is static, so
- * nothing ever fires.  Components that gate their startup on it stay asleep —
- * esp_ot_br_server is exactly such a component: esp_br_web_start() only
- * REGISTERS handlers for STA_GOT_IP / ETH_GOT_IP and starts the HTTP server
- * from inside them.  Call this after those handlers are registered. */
+ * The physical netif posts this after DHCP, but late consumers may not yet be
+ * registered. The USB/TAP address is static and never posts it. Call this
+ * after esp_br_web_start() so the REST server sees the current address. */
 esp_err_t backbone_announce_got_ip(void);
 
 #ifdef __cplusplus

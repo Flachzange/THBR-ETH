@@ -11,11 +11,65 @@
       "displayName": "THBR C6 – USB/TAP baseline",
       "description": "Known-good original THBR build with Border Router and BLE proxy",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build-thbr-c6",
+      "binaryDir": "build-thbr-c6",
       "cacheVariables": {
         "IDF_TARGET": "esp32c6",
         "SDKCONFIG": "${sourceDir}/sdkconfig.ble",
         "SDKCONFIG_DEFAULTS": "${sourceDir}/sdkconfig.defaults;${sourceDir}/sdkconfig.defaults.br;${sourceDir}/sdkconfig.defaults.ble"
+      },
+      "vendor": {
+        "espressif/vscode-esp-idf": {
+          "schemaVersion": 1,
+          "settings": [
+            {
+              "type": "flashBaudRate",
+              "value": "460800"
+            },
+            {
+              "type": "monitorBaudRate",
+              "value": "115200"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "thbr-c6-w5500-stage1",
+      "displayName": "THBR C6 – W5500 Ethernet (stage 1)",
+      "description": "Eth-Bug-PoE link and DHCP bring-up; Thread Border Router disabled",
+      "generator": "Ninja",
+      "binaryDir": "build-thbr-c6-w5500-stage1",
+      "cacheVariables": {
+        "IDF_TARGET": "esp32c6",
+        "SDKCONFIG": "${sourceDir}/sdkconfig.w5500-stage1",
+        "SDKCONFIG_DEFAULTS": "${sourceDir}/sdkconfig.defaults;${sourceDir}/sdkconfig.defaults.w5500"
+      },
+      "vendor": {
+        "espressif/vscode-esp-idf": {
+          "schemaVersion": 1,
+          "settings": [
+            {
+              "type": "flashBaudRate",
+              "value": "460800"
+            },
+            {
+              "type": "monitorBaudRate",
+              "value": "115200"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "thbr-c6-w5500-stage2",
+      "displayName": "THBR C6 – W5500 Ethernet + Thread Border Router (stage 2)",
+      "description": "Eth-Bug-PoE physical Ethernet backbone with OpenThread Border Routing enabled",
+      "generator": "Ninja",
+      "binaryDir": "build-thbr-c6-w5500-stage2",
+      "cacheVariables": {
+        "IDF_TARGET": "esp32c6",
+        "SDKCONFIG": "${sourceDir}/sdkconfig.w5500-stage2",
+        "SDKCONFIG_DEFAULTS": "${sourceDir}/sdkconfig.defaults;${sourceDir}/sdkconfig.defaults.w5500;${sourceDir}/sdkconfig.defaults.br"
       },
       "vendor": {
         "espressif/vscode-esp-idf": {

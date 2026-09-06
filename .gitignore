@@ -5,6 +5,8 @@
 /sdkconfig.c5
 /sdkconfig.ble
 /sdkconfig.heap
+/sdkconfig.w5500-stage1
+/sdkconfig.w5500-stage2
 /dependencies.lock
 /managed_components/
 /build/
@@ -40,3 +42,4 @@ HARDWARE_STATUS.md
 *.key
 *.pem
 .claude/
+/sdkconfig*.backup

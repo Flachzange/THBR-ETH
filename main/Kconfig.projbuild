@@ -1,28 +1,77 @@
-menu "THBR — Thread Border Router over serial IP backbone"
+menu "THBR — Thread Border Router"
 
     choice THBR_TRANSPORT
-        prompt "Backbone transport over the USB-Serial/JTAG port"
+        prompt "Backbone transport"
         default THBR_TRANSPORT_TAP
         help
-            How the IPv6 backbone reaches the host through the C6's only USB
-            port (which is hardwired to CDC-ACM — no Ethernet gadget possible).
+            Select the network interface that carries infrastructure traffic
+            between the Thread mesh and the LAN.
 
         config THBR_TRANSPORT_TAP
-            bool "Ethernet frames, SLIP-framed, to a host TAP device"
+            bool "Ethernet frames over USB serial (host TAP)"
             help
-                A real L2 netif: MAC, broadcast domain, MLD6/IGMP.  This is
-                what the border-router library needs — over PPP it never
-                initialises its infra-interface side (measured, see PLAN.md) —
-                and it is what HAOS can run (CONFIG_TUN=y everywhere, no
-                kernel PPP on x86_64).  Host side: tools/tap_pump.py.
+                A real L2 netif transported through USB-Serial/JTAG using
+                SLIP framing. Host side: tools/tap_pump.py.
 
         config THBR_TRANSPORT_PPP
-            bool "PPP (pppd on the host)"
+            bool "PPP over USB serial"
             help
-                Carries IP correctly and needs no custom host code, but the
-                border router will not route on it.  Kept as the control case
-                and for plain data transports.
+                Carries IP correctly, but the border-router library does not
+                route over this point-to-point netif. Kept as a control case.
+
+        config THBR_TRANSPORT_W5500
+            bool "W5500 SPI Ethernet (Eth-Bug-PoE)"
+            help
+                Physical 10/100 Ethernet. USB remains a diagnostic console;
+                no TAP pump or permanently attached host is needed.
     endchoice
+
+    config THBR_W5500_MISO_GPIO
+        int "W5500 MISO GPIO"
+        depends on THBR_TRANSPORT_W5500
+        default 2
+        range 0 30
+
+    config THBR_W5500_INT_GPIO
+        int "W5500 interrupt GPIO"
+        depends on THBR_TRANSPORT_W5500
+        default 4
+        range 0 30
+
+    config THBR_W5500_CS_GPIO
+        int "W5500 chip-select GPIO"
+        depends on THBR_TRANSPORT_W5500
+        default 5
+        range 0 30
+
+    config THBR_W5500_SCLK_GPIO
+        int "W5500 clock GPIO"
+        depends on THBR_TRANSPORT_W5500
+        default 6
+        range 0 30
+
+    config THBR_W5500_MOSI_GPIO
+        int "W5500 MOSI GPIO"
+        depends on THBR_TRANSPORT_W5500
+        default 7
+        range 0 30
+
+    config THBR_W5500_RESET_GPIO
+        int "W5500 reset GPIO (-1 if not connected)"
+        depends on THBR_TRANSPORT_W5500
+        default -1
+        range -1 30
+
+    config THBR_W5500_SPI_CLOCK_MHZ
+        int "W5500 SPI clock (MHz)"
+        depends on THBR_TRANSPORT_W5500
+        default 20
+        range 5 40
+
+    config THBR_W5500_HOSTNAME
+        string "W5500 DHCP hostname"
+        depends on THBR_TRANSPORT_W5500
+        default "thbr-eth"
 
     config THBR_TAP_MTU
         int "Backbone MTU (TAP transport)"
@@ -96,6 +145,7 @@ menu "THBR — Thread Border Router over serial IP backbone"
 
     config THBR_BLE_PROXY_URI
         string "Matter server BLE proxy endpoint"
+        default "" if THBR_TRANSPORT_W5500
         default "ws://192.168.45.1:5580/ble"
         help
             Where the BLE proxy dials in.  The Matter server offers this on

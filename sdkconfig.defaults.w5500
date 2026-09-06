@@ -1,0 +1,27 @@
+# ESP32-C6-Bug + Eth-Bug-PoE: common W5500 Ethernet defaults.
+CONFIG_THBR_TRANSPORT_W5500=y
+CONFIG_THBR_W5500_MISO_GPIO=2
+CONFIG_THBR_W5500_INT_GPIO=4
+CONFIG_THBR_W5500_CS_GPIO=5
+CONFIG_THBR_W5500_SCLK_GPIO=6
+CONFIG_THBR_W5500_MOSI_GPIO=7
+CONFIG_THBR_W5500_RESET_GPIO=-1
+CONFIG_THBR_W5500_SPI_CLOCK_MHZ=20
+CONFIG_THBR_W5500_HOSTNAME="thbr-eth"
+# Stage 1 keeps the border router off. Stage 2 appends sdkconfig.defaults.br,
+# whose later value enables it together with the required lwIP IPv6 hooks.
+CONFIG_THBR_ENABLE_BORDER_ROUTER=n
+CONFIG_THBR_BLE_PROXY_URI=""
+CONFIG_MDNS_PREDEF_NETIF_ETH=y
+
+# The ESP-IDF 6.0.2 OTBR implementation is shipped as a prebuilt library that
+# was compiled without lwIP PPP support. Enabling PPP adds one client-data
+# pointer to struct netif and shifts netif->num by four bytes. The prebuilt
+# library then reads Ethernet's hwaddr_len (6) as the interface number and
+# reports the bogus infrastructure index 7. W5500 does not need PPP, so keep
+# the ABI used by libopenthread_br.a.
+CONFIG_LWIP_PPP_SUPPORT=n
+
+# Compile the OTBR APIs required by esp_ot_br_server, but do not start them.
+CONFIG_OPENTHREAD_ENABLED=y
+CONFIG_OPENTHREAD_BORDER_ROUTER=y

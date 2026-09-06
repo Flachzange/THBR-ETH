@@ -1,21 +1,8 @@
 /*
- * THBR — ESP32-C6 single-chip Thread Border Router whose IPv6 backbone is a
- * serial IP link (PPP over the native USB-Serial/JTAG port), not WiFi and not
- * Ethernet.
+ * THBR — ESP32-C6 single-chip Thread Border Router.
  *
- * Rationale, measurements and the HAOS/TAP product lane: PLAN.md.  Sibling
- * project TBR does the same job with a W5500 Ethernet backbone and is the
- * source of this control flow.
- *
- * THE PORT HANDOVER
- * -----------------
- * This chip has exactly one USB port and PPP needs it.  Boot therefore runs in
- * two acts:
- *
- *   act 1  console on USB-Serial/JTAG, plain text, THBR_CONSOLE_GRACE_MS long
- *          — this is what answers "did it boot at all?" without a UART adapter
- *   act 2  console detached, PPP owns the port, logs continue as UDP datagrams
- *          to the PPP peer (see log_sink.h; on the host: nc -u -l -p 5514)
+ * Backbones: PPP or Ethernet frames over USB, or physical W5500 Ethernet over
+ * SPI. The USB transports take the console after boot; W5500 leaves it intact.
  *
  * Verified ordering note (inherited from TBR, 2026-05-28):
  * esp_openthread_border_router.h claims set_backbone_netif() must be called
@@ -41,10 +28,10 @@
 #include "esp_vfs_eventfd.h"
 #include "nvs_flash.h"
 
+
 #if CONFIG_THBR_ENABLE_BORDER_ROUTER
 #include "mdns.h"
 
-void thbr_ble_proxy_start(const char *uri);
 #include "esp_openthread.h"
 #include "esp_openthread_border_router.h"
 #include "esp_openthread_lock.h"
@@ -69,6 +56,8 @@ void thbr_ble_proxy_start(const char *uri);
 
 #define TAG "thbr"
 
+void thbr_ble_proxy_start(const char *uri);
+
 static void banner(void)
 {
     esp_chip_info_t chip;
@@ -81,8 +70,10 @@ static void banner(void)
     esp_read_mac(mac, ESP_MAC_BASE);
 
     printf("\n=== THBR v%s (%s) ===\n", FW_VERSION_STRING, FW_BUILD_DATE);
-    #if CONFIG_THBR_TRANSPORT_TAP
+#if CONFIG_THBR_TRANSPORT_TAP
     printf("On-chip Thread Border Router, backbone = Ethernet over CDC-ACM (host TAP)\n");
+#elif CONFIG_THBR_TRANSPORT_W5500
+    printf("On-chip Thread Border Router, backbone = W5500 SPI Ethernet (Eth-Bug-PoE)\n");
 #else
     printf("On-chip Thread Border Router, backbone = PPP over USB-Serial/JTAG\n");
 #endif
@@ -227,7 +218,7 @@ static void border_router_init_task(void *ctx)
     esp_err_t err = backbone_wait_up(CONFIG_THBR_BACKBONE_WAIT_MS);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "backbone not up after %d ms — initialising BR anyway; "
-                      "border routing starts when PPP negotiates",
+                      "border routing starts when the backbone acquires an address",
                  CONFIG_THBR_BACKBONE_WAIT_MS);
     }
 
@@ -245,7 +236,7 @@ static void border_router_init_task(void *ctx)
         vTaskDelete(NULL);
         return;
     }
-    ESP_LOGI(TAG, "border router initialised — backbone = PPP netif");
+    ESP_LOGI(TAG, "border router initialised — backbone netif attached");
     info_server_set_ot_ready(true);
 
     /* Bring the Thread network up.  The serial CLI is not available (PPP owns
@@ -482,13 +473,18 @@ void app_main(void)
     }
     fflush(stdout);
 
+#if CONFIG_THBR_TRANSPORT_W5500
+    ESP_ERROR_CHECK(berr);
+    printf("W5500 uses SPI — USB console remains attached\n\n");
+    fflush(stdout);
+    info_server_start();
+#else
     printf("handing the USB port to the backbone in %d ms — further logs go to UDP:%d "
            "on the host\n\n",
            CONFIG_THBR_CONSOLE_GRACE_MS, CONFIG_THBR_LOG_UDP_PORT);
     fflush(stdout);
     vTaskDelay(pdMS_TO_TICKS(CONFIG_THBR_CONSOLE_GRACE_MS));
 
-    /* --- act 2: the backbone owns the port ------------------------------ */
     log_sink_detach_console();
     ESP_ERROR_CHECK(berr);
     ESP_ERROR_CHECK(log_sink_start_udp(0, CONFIG_THBR_LOG_UDP_PORT));
@@ -496,6 +492,7 @@ void app_main(void)
      * router, so "THBR present, BR broken" is distinguishable from "no
      * THBR at all". */
     info_server_start();
+#endif
 
 #if CONFIG_THBR_ENABLE_BORDER_ROUTER
     /* From here on failures are logged, never fatal: aborting after the
@@ -514,7 +511,7 @@ void app_main(void)
 
     xTaskCreate(border_router_init_task, "thbr_br_init", 6144, NULL, 4, NULL);
 #else
-    ESP_LOGI(TAG, "stage 1 build: PPP backbone only, border router disabled "
+    ESP_LOGI(TAG, "stage 1 build: backbone transport only, border router disabled "
                   "(CONFIG_THBR_ENABLE_BORDER_ROUTER=n)");
 #endif
 
@@ -597,10 +594,10 @@ void app_main(void)
                  (brs < 4) ? br_state[brs] : "?", (r < 5) ? role[r] : "?",
                  esp_netif_get_netif_impl_index(backbone_netif()));
 
-        /* Report the mesh-side addresses once routing is live: without a CLI
-         * this is the only way to learn the OMR address to ping from the
-         * host, and it is what proves the route the host learned by RA
-         * actually leads somewhere. */
+        /* Report the mesh-side addresses once routing is live. OpenThread
+         * tells us which prefix is the favored OMR prefix and marks its own
+         * mesh-local addresses; do not try to infer either from a hard-coded
+         * ULA value. */
         /* When border routing is NOT running, say WHY — otherwise the state is
          * a black box, which is exactly what once cost a migration its
          * diagnosis.  Two things are worth knowing:
@@ -644,19 +641,38 @@ void app_main(void)
             }
         }
 
-        /* Keep reporting until an address outside the mesh-local and
-         * link-local prefixes shows up — that is the OMR address, the one an
-         * off-mesh host can actually reach, and it only appears once the
-         * routing manager has published its prefix into the mesh. */
+        /* Keep reporting until an address matching the favored OMR prefix
+         * appears. That is the address an infrastructure host can reach via
+         * the RIO advertised by the Border Routing Manager. */
         static bool omr_seen;
         if (!omr_seen && brs == OT_BORDER_ROUTING_STATE_RUNNING) {
             esp_openthread_lock_acquire(portMAX_DELAY);
-            for (const otNetifAddress *a = otIp6GetUnicastAddresses(esp_openthread_get_instance());
+            otInstance *instance = esp_openthread_get_instance();
+            otIp6Prefix omr_prefix;
+            otRoutePreference omr_preference;
+            bool have_omr = (otBorderRoutingGetFavoredOmrPrefix(
+                                instance, &omr_prefix, &omr_preference) == OT_ERROR_NONE);
+
+            if (have_omr) {
+                char prefix_string[OT_IP6_PREFIX_STRING_SIZE];
+                otIp6PrefixToString(&omr_prefix, prefix_string, sizeof(prefix_string));
+                ESP_LOGI(TAG, "favored OMR prefix: %s (advertised to infrastructure)",
+                         prefix_string);
+            }
+
+            for (const otNetifAddress *a = otIp6GetUnicastAddresses(instance);
                  a != NULL; a = a->mNext) {
                 const uint8_t *b = a->mAddress.mFields.m8;
-                bool mesh_local = (b[0] == 0xfd && b[1] == 0x00 && b[2] == 0x0d && b[3] == 0xb8);
-                bool link_local = (b[0] == 0xfe && b[1] == 0x80);
-                if (!mesh_local && !link_local) {
+                bool link_local = (b[0] == 0xfe && (b[1] & 0xc0) == 0x80);
+                bool omr = have_omr &&
+                           otIp6PrefixMatch(&a->mAddress, &omr_prefix.mPrefix) >= omr_prefix.mLength;
+                const char *classification = omr
+                    ? " <-- OMR, reachable from infrastructure"
+                    : a->mMeshLocal
+                        ? " <-- mesh-local (Thread-internal)"
+                        : link_local ? " <-- link-local" : "";
+
+                if (omr) {
                     omr_seen = true;
                 }
                 ESP_LOGI(TAG, "thread addr: %02x%02x:%02x%02x:%02x%02x:%02x%02x:"
@@ -664,7 +680,7 @@ void app_main(void)
                          b[0],b[1],b[2],b[3],b[4],b[5],b[6],b[7],
                          b[8],b[9],b[10],b[11],b[12],b[13],b[14],b[15],
                          a->mPrefixLength, a->mPreferred ? " (preferred)" : "",
-                         (!mesh_local && !link_local) ? " <-- OMR, reachable from the host" : "");
+                         classification);
             }
             esp_openthread_lock_release();
         }
