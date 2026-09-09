@@ -8,8 +8,8 @@ CONFIG_THBR_W5500_MOSI_GPIO=7
 CONFIG_THBR_W5500_RESET_GPIO=-1
 CONFIG_THBR_W5500_SPI_CLOCK_MHZ=20
 CONFIG_THBR_W5500_HOSTNAME="thbr-eth"
-# Stage 1 keeps the border router off. Stage 2 appends sdkconfig.defaults.br,
-# whose later value enables it together with the required lwIP IPv6 hooks.
+# The production preset appends sdkconfig.defaults.br after this file; its later
+# value enables the border router together with the required lwIP IPv6 hooks.
 CONFIG_THBR_ENABLE_BORDER_ROUTER=n
 CONFIG_THBR_BLE_PROXY_URI=""
 CONFIG_MDNS_PREDEF_NETIF_ETH=y

@@ -5,9 +5,7 @@
 /sdkconfig.c5
 /sdkconfig.ble
 /sdkconfig.heap
-/sdkconfig.w5500-stage1
-/sdkconfig.w5500-stage2
-/sdkconfig.w5500-stage3
+/sdkconfig.w5500
 /dependencies.lock
 /managed_components/
 /build/

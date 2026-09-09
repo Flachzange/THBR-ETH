@@ -90,11 +90,9 @@ Exactly one backbone implementation is compiled into a firmware image.
 | Ethernet over USB/TAP | Original THBR deployment with host TAP | Yes |
 | PPP over USB | Point-to-point control/data transport | Yes |
 
-The Stage 1 and Stage 2 W5500 profiles leave the Matter BLE proxy disabled so
-Ethernet and Border Routing can be tested independently. Stage 3 adds the
-existing THBR BLE proxy. Its Matter-server endpoint remains empty by default
-and is configured at runtime through the info API; it is not tied to a LAN
-address in the firmware image.
+The W5500 profile includes the existing THBR BLE proxy. Its Matter-server
+endpoint remains empty by default and is configured at runtime through the
+info API; it is not tied to a LAN address in the firmware image.
 
 ## Build requirements
 
@@ -114,39 +112,28 @@ performed specifically with ESP-IDF 6.0.2.
 
 ## Build profiles
 
-`CMakePresets.json` contains an existing USB/TAP baseline and two W5500
-profiles:
+`CMakePresets.json` contains the original USB/TAP baseline and the standalone
+W5500 production profile:
 
 | Preset | Configuration |
 | --- | --- |
-| USB/TAP baseline | Original THBR build with Border Router and BLE proxy |
-| `thbr-c6-w5500-stage1` | W5500 link and DHCP; Border Router disabled |
-| `thbr-c6-w5500-stage2` | W5500 plus OpenThread Border Router |
-| `thbr-c6-w5500-stage3` | W5500 plus OpenThread Border Router and Matter BLE proxy |
+| `thbr-c6-usb` | Original THBR build with USB/TAP, Border Router and BLE proxy |
+| `thbr-c6-w5500` | W5500, OpenThread Border Router and Matter BLE proxy |
 
-Stage 1 isolates Ethernet bring-up from OpenThread. Stage 2 is the standalone
-border-router firmware without Bluetooth. Stage 3 adds the BLE commissioning
-path while retaining the same W5500 backbone and Border Router configuration.
+The W5500 profile layers these configuration files:
 
-The W5500 profiles layer these files:
-
-```
-Stage 1: sdkconfig.defaults + sdkconfig.defaults.w5500
-Stage 2: sdkconfig.defaults + sdkconfig.defaults.w5500 + sdkconfig.defaults.br
-Stage 3: sdkconfig.defaults + sdkconfig.defaults.w5500 + sdkconfig.defaults.br + sdkconfig.defaults.ble
+```text
+sdkconfig.defaults + sdkconfig.defaults.w5500 + sdkconfig.defaults.br + sdkconfig.defaults.ble
 ```
 
-The generated `sdkconfig.w5500-stage1`, `sdkconfig.w5500-stage2` and
-`sdkconfig.w5500-stage3` files and
-their build directories are local build output and are ignored by Git.
+The generated `sdkconfig.w5500` file and `build-thbr-c6-w5500` directory are
+local build output and are ignored by Git.
 
 ## Building and flashing with VS Code
 
 1. Open the repository in a VS Code window with the ESP-IDF 6.0.2 environment
    active.
-2. Select `thbr-c6-w5500-stage1` for Ethernet-only bring-up,
-   `thbr-c6-w5500-stage2` for the Border Router without Bluetooth, or
-   `thbr-c6-w5500-stage3` for the Border Router with the Matter BLE proxy.
+2. Select `thbr-c6-w5500`.
 3. Configure the selected CMake preset.
 4. Build the project.
 5. Flash the resulting image with the ESP-IDF extension.
@@ -162,12 +149,9 @@ and `SDKCONFIG_DEFAULTS` values instead of relying on `idf.py --preset`.
 ## Expected runtime behaviour
 
 After Ethernet starts, the log reports the W5500 pin assignment, link state,
-MAC address and DHCP lease. A Stage 1 build stops after bringing up the
-backbone.
-
-With Stage 2, `br=stopped role=detached` is normal directly after boot. On the
-tested hardware the router consistently reached `br=running role=leader` after
-approximately 20 seconds.
+MAC address and DHCP lease. `br=stopped role=detached` is normal directly
+after boot. On the tested hardware the router consistently reached
+`br=running role=leader` after approximately 20 seconds.
 
 The diagnostic API listens on port 8082. For example:
 
@@ -175,7 +159,7 @@ The diagnostic API listens on port 8082. For example:
 http://<DHCP-address>:8082/status
 ```
 
-A healthy Stage 2 response resembles:
+A healthy response resembles:
 
 ```json
 {"fw":"0.1.46","uptime_s":295,"heap":353640,"heap_min":353184,"link":"up","br":"running","role":"leader"}
@@ -219,7 +203,7 @@ Border Router fault.
 
 ## Important lwIP/OTBR compatibility setting
 
-For the W5500 profiles, `CONFIG_LWIP_PPP_SUPPORT` must be disabled.
+For the W5500 profile, `CONFIG_LWIP_PPP_SUPPORT` must be disabled.
 
 ESP-IDF 6.0.2 supplies the OpenThread Border Router implementation as a
 prebuilt library. Enabling lwIP PPP support changes the layout of lwIP's
@@ -272,9 +256,8 @@ the W5500 build and network instructions in this README for THBR-ETH.
 - THBR-ETH fork: <https://github.com/Flachzange/THBR-ETH>
 - W5500 development branch: `feature/w5500-backbone`
 
-The W5500 changes are developed in separate Stage 1 and Stage 2 steps, built
-locally and validated on the physical hardware before they are committed and
-pushed.
+The W5500 implementation was developed incrementally and validated on physical
+ESP32-C6-Bug and Eth-Bug-PoE hardware.
 
 ## Licence
 
