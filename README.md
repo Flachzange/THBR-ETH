@@ -90,10 +90,11 @@ Exactly one backbone implementation is compiled into a firmware image.
 | Ethernet over USB/TAP | Original THBR deployment with host TAP | Yes |
 | PPP over USB | Point-to-point control/data transport | Yes |
 
-The Matter BLE proxy inherited from THBR is disabled in the W5500 profiles.
-It remains part of the original USB/TAP configuration. Matter commissioning
-with the W5500 build therefore needs a controller with its own suitable
-commissioning path, for example Bluetooth available to the Matter controller.
+The Stage 1 and Stage 2 W5500 profiles leave the Matter BLE proxy disabled so
+Ethernet and Border Routing can be tested independently. Stage 3 adds the
+existing THBR BLE proxy. Its Matter-server endpoint remains empty by default
+and is configured at runtime through the info API; it is not tied to a LAN
+address in the firmware image.
 
 ## Build requirements
 
@@ -121,26 +122,31 @@ profiles:
 | USB/TAP baseline | Original THBR build with Border Router and BLE proxy |
 | `thbr-c6-w5500-stage1` | W5500 link and DHCP; Border Router disabled |
 | `thbr-c6-w5500-stage2` | W5500 plus OpenThread Border Router |
+| `thbr-c6-w5500-stage3` | W5500 plus OpenThread Border Router and Matter BLE proxy |
 
 Stage 1 isolates Ethernet bring-up from OpenThread. Stage 2 is the standalone
-border-router firmware.
+border-router firmware without Bluetooth. Stage 3 adds the BLE commissioning
+path while retaining the same W5500 backbone and Border Router configuration.
 
 The W5500 profiles layer these files:
 
 ```
 Stage 1: sdkconfig.defaults + sdkconfig.defaults.w5500
 Stage 2: sdkconfig.defaults + sdkconfig.defaults.w5500 + sdkconfig.defaults.br
+Stage 3: sdkconfig.defaults + sdkconfig.defaults.w5500 + sdkconfig.defaults.br + sdkconfig.defaults.ble
 ```
 
-The generated `sdkconfig.w5500-stage1` and `sdkconfig.w5500-stage2` files and
+The generated `sdkconfig.w5500-stage1`, `sdkconfig.w5500-stage2` and
+`sdkconfig.w5500-stage3` files and
 their build directories are local build output and are ignored by Git.
 
 ## Building and flashing with VS Code
 
 1. Open the repository in a VS Code window with the ESP-IDF 6.0.2 environment
    active.
-2. Select `thbr-c6-w5500-stage1` for Ethernet-only bring-up or
-   `thbr-c6-w5500-stage2` for the complete Border Router.
+2. Select `thbr-c6-w5500-stage1` for Ethernet-only bring-up,
+   `thbr-c6-w5500-stage2` for the Border Router without Bluetooth, or
+   `thbr-c6-w5500-stage3` for the Border Router with the Matter BLE proxy.
 3. Configure the selected CMake preset.
 4. Build the project.
 5. Flash the resulting image with the ESP-IDF extension.

@@ -86,6 +86,33 @@
           ]
         }
       }
+    },
+    {
+      "name": "thbr-c6-w5500-stage3",
+      "displayName": "THBR C6 – W5500 Ethernet + Thread Border Router + BLE proxy (stage 3)",
+      "description": "Eth-Bug-PoE physical Ethernet backbone with OpenThread Border Routing and the Matter BLE proxy enabled",
+      "generator": "Ninja",
+      "binaryDir": "build-thbr-c6-w5500-stage3",
+      "cacheVariables": {
+        "IDF_TARGET": "esp32c6",
+        "SDKCONFIG": "${sourceDir}/sdkconfig.w5500-stage3",
+        "SDKCONFIG_DEFAULTS": "${sourceDir}/sdkconfig.defaults;${sourceDir}/sdkconfig.defaults.w5500;${sourceDir}/sdkconfig.defaults.br;${sourceDir}/sdkconfig.defaults.ble"
+      },
+      "vendor": {
+        "espressif/vscode-esp-idf": {
+          "schemaVersion": 1,
+          "settings": [
+            {
+              "type": "flashBaudRate",
+              "value": "460800"
+            },
+            {
+              "type": "monitorBaudRate",
+              "value": "115200"
+            }
+          ]
+        }
+      }
     }
   ]
 }
