@@ -423,6 +423,7 @@ void app_main(void)
 
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(log_sink_init());
+    info_server_init_boot_diagnostics();
 
     /* eventfds: netif + task queue + border router, plus the native 802.15.4
      * radio driver. */
