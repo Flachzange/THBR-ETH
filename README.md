@@ -165,6 +165,15 @@ A healthy response resembles:
 {"fw":"0.1.46","uptime_s":295,"heap":353640,"heap_min":353184,"link":"up","br":"running","role":"leader"}
 ```
 
+The reset-diagnostics build adds `reset_reason` (an ESP-IDF `ESP_RST_*`
+name), `reset_reason_code`, persistent `boot_count`, `boot_count_valid`,
+and `reboot_requested` (true only for a software reset with a recorded
+request to `POST /reboot`). Read `boot_count` to detect restarts, including
+multiple restarts between HTTP polls. The counter is stored in NVS alongside
+the existing Thread network data; **do not erase NVS** to troubleshoot a
+reset unless you intend to lose the stored Thread dataset. For reset
+path analysis and caveats, see [reset diagnostics](docs/RESET_DIAGNOSTICS.md).
+
 The OpenThread web/REST service uses the normal HTTP service on the device's
 DHCP address.
 
