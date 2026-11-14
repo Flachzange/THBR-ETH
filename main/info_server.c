@@ -109,14 +109,14 @@ void info_server_init_boot_diagnostics(void)
         ESP_LOGW(TAG, "could not read reboot marker: %s", esp_err_to_name(marker_err));
     }
 
-    if (err == ESP_OK) {
-        err = nvs_commit(h);
-    }
-    if (err == ESP_OK) {
+    /* Commit the marker removal even if updating the counter failed. */
+    esp_err_t commit_err = nvs_commit(h);
+    if (err == ESP_OK && commit_err == ESP_OK) {
         s_boot_count = count;
         s_boot_count_valid = true;
     } else {
-        ESP_LOGW(TAG, "boot counter NVS update failed: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "boot counter NVS update failed: %s",
+                 esp_err_to_name(err != ESP_OK ? err : commit_err));
     }
     nvs_close(h);
 
