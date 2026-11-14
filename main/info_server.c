@@ -37,6 +37,96 @@ static const char *TAG = "thbr_info";
 static httpd_handle_t s_server;
 static volatile bool  s_ot_ready;
 
+/* Reset diagnostics are captured once during boot, before other tasks start.
+ * The counter lives in NVS and survives normal flashing and power cycles.
+ * Keep diagnostics best-effort: NVS problems must never trigger another reset. */
+#define DIAG_NVS_NS  "thbr_diag"
+#define DIAG_NVS_BOOTS "boots"
+#define DIAG_NVS_API_REBOOT "api_reboot"
+
+static esp_reset_reason_t s_reset_reason = ESP_RST_UNKNOWN;
+static uint32_t s_boot_count;
+static bool s_boot_count_valid;
+static bool s_api_reboot_requested;
+
+static const char *reset_reason_name(esp_reset_reason_t reason)
+{
+    switch (reason) {
+    case ESP_RST_POWERON:    return "ESP_RST_POWERON";
+    case ESP_RST_EXT:        return "ESP_RST_EXT";
+    case ESP_RST_SW:         return "ESP_RST_SW";
+    case ESP_RST_PANIC:      return "ESP_RST_PANIC";
+    case ESP_RST_INT_WDT:    return "ESP_RST_INT_WDT";
+    case ESP_RST_TASK_WDT:   return "ESP_RST_TASK_WDT";
+    case ESP_RST_WDT:        return "ESP_RST_WDT";
+    case ESP_RST_DEEPSLEEP:  return "ESP_RST_DEEPSLEEP";
+    case ESP_RST_BROWNOUT:   return "ESP_RST_BROWNOUT";
+    case ESP_RST_SDIO:       return "ESP_RST_SDIO";
+    case ESP_RST_USB:        return "ESP_RST_USB";
+    case ESP_RST_JTAG:       return "ESP_RST_JTAG";
+    case ESP_RST_EFUSE:      return "ESP_RST_EFUSE";
+    case ESP_RST_PWR_GLITCH: return "ESP_RST_PWR_GLITCH";
+    case ESP_RST_CPU_LOCKUP: return "ESP_RST_CPU_LOCKUP";
+    case ESP_RST_UNKNOWN:
+    default:                return "ESP_RST_UNKNOWN";
+    }
+}
+
+void info_server_init_boot_diagnostics(void)
+{
+    s_reset_reason = esp_reset_reason();
+
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(DIAG_NVS_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "boot diagnostics NVS open failed: %s", esp_err_to_name(err));
+        return;
+    }
+
+    uint32_t count = 0;
+    err = nvs_get_u32(h, DIAG_NVS_BOOTS, &count);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        err = ESP_OK;
+    }
+    if (err == ESP_OK) {
+        if (count < UINT32_MAX) {
+            ++count;
+        }
+        err = nvs_set_u32(h, DIAG_NVS_BOOTS, count);
+    }
+
+    /* The marker is set only by the HTTP reboot endpoint. Clear it on every
+     * boot to avoid misattributing a later software reset to this request. */
+    uint8_t api_marker = 0;
+    esp_err_t marker_err = nvs_get_u8(h, DIAG_NVS_API_REBOOT, &api_marker);
+    if (marker_err == ESP_OK) {
+        s_api_reboot_requested = api_marker == 1 && s_reset_reason == ESP_RST_SW;
+        esp_err_t erase_err = nvs_erase_key(h, DIAG_NVS_API_REBOOT);
+        if (erase_err != ESP_OK) {
+            ESP_LOGW(TAG, "could not clear reboot marker: %s", esp_err_to_name(erase_err));
+        }
+    } else if (marker_err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGW(TAG, "could not read reboot marker: %s", esp_err_to_name(marker_err));
+    }
+
+    if (err == ESP_OK) {
+        err = nvs_commit(h);
+    }
+    if (err == ESP_OK) {
+        s_boot_count = count;
+        s_boot_count_valid = true;
+    } else {
+        ESP_LOGW(TAG, "boot counter NVS update failed: %s", esp_err_to_name(err));
+    }
+    nvs_close(h);
+
+    ESP_LOGI(TAG, "boot diagnostics: reason=%s (%d), count=%" PRIu32
+                  ", valid=%d, api_reboot=%d",
+             reset_reason_name(s_reset_reason), (int)s_reset_reason,
+             s_boot_count, (int)s_boot_count_valid, (int)s_api_reboot_requested);
+}
+
+
 void info_server_set_ot_ready(bool ready)
 {
     s_ot_ready = ready;
@@ -82,13 +172,19 @@ static esp_err_t status_get(httpd_req_t *req)
     }
 #endif
 
-    char body[256];
+    char body[384];
     snprintf(body, sizeof(body),
              "{\"fw\":\"%s\",\"uptime_s\":%" PRId64 ",\"heap\":%" PRIu32
-             ",\"heap_min\":%" PRIu32 ",\"link\":\"%s\",\"br\":\"%s\",\"role\":\"%s\"}",
+             ",\"heap_min\":%" PRIu32 ",\"link\":\"%s\",\"br\":\"%s\",\"role\":\"%s\""
+             ",\"reset_reason\":\"%s\",\"reset_reason_code\":%d"
+             ",\"boot_count\":%" PRIu32 ",\"boot_count_valid\":%s"
+             ",\"reboot_requested\":%s}",
              FW_VERSION_STRING, esp_timer_get_time() / 1000000,
              esp_get_free_heap_size(), esp_get_minimum_free_heap_size(),
-             backbone_is_up() ? "up" : "down", br, role);
+             backbone_is_up() ? "up" : "down", br, role,
+             reset_reason_name(s_reset_reason), (int)s_reset_reason,
+             s_boot_count, s_boot_count_valid ? "true" : "false",
+             s_api_reboot_requested ? "true" : "false");
     return send_json(req, body);
 }
 
@@ -137,6 +233,20 @@ static void reboot_task(void *ctx)
 {
     (void)ctx;
     vTaskDelay(pdMS_TO_TICKS(500));      /* let the HTTP response leave first */
+    /* Persist the source before esp_restart(), so the next boot can
+     * distinguish an API request from another ESP_RST_SW reset. */
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(DIAG_NVS_NS, NVS_READWRITE, &h);
+    if (err == ESP_OK) {
+        err = nvs_set_u8(h, DIAG_NVS_API_REBOOT, 1);
+        if (err == ESP_OK) {
+            err = nvs_commit(h);
+        }
+        nvs_close(h);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "could not persist API reboot marker: %s", esp_err_to_name(err));
+    }
     ESP_LOGW(TAG, "reboot requested over the info API");
     esp_restart();
 }
