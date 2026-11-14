@@ -250,11 +250,13 @@ BLE-proxy architecture:
 Those documents do not currently describe the standalone W5500 profile. Use
 the W5500 build and network instructions in this README for THBR-ETH.
 
-## Project origin and development branch
+## Project origin and branches
 
 - Upstream project: <https://github.com/tostmann/THBR>
 - THBR-ETH fork: <https://github.com/Flachzange/THBR-ETH>
+- Default branch (including W5500 support): `main`
 - W5500 development branch: `feature/w5500-backbone`
+- Upstream integrated through release: `2026.10.46`
 
 The W5500 implementation was developed incrementally and validated on physical
 ESP32-C6-Bug and Eth-Bug-PoE hardware.
