@@ -211,6 +211,12 @@ static void sync_backbone_onlink_address(void)
 }
 
 
+/* The infrastructure-interface index the border-router library accepts, -1
+ * until it is known.  It is not the backbone netif's index on every stick (see
+ * border_router_init_task), so the heartbeat reports both: a heartbeat that
+ * showed only the netif's read as "no mismatch" while the library held 7. */
+static volatile int s_library_idx = -1;
+
 static void border_router_init_task(void *ctx)
 {
     (void)ctx;
@@ -346,6 +352,9 @@ static void border_router_init_task(void *ctx)
             ierr = e;
             break;
         }
+    }
+    if (ierr == OT_ERROR_NONE) {
+        s_library_idx = (int)infra_idx;
     }
     ESP_LOGI(TAG, "infra-if reported running: netif_idx=%" PRIu32 " library_idx=%" PRIu32
                   "%s ot_error=%d br_state=%d",
@@ -588,11 +597,16 @@ void app_main(void)
                 log_thread_addr_states();
             }
         }
-        if (say)
-        ESP_LOGI(TAG, "alive: link=%s heap=%" PRIu32 " br=%s role=%s infra_idx=%d",
-                 backbone_is_up() ? "up" : "down", esp_get_free_heap_size(),
-                 (brs < 4) ? br_state[brs] : "?", (r < 5) ? role[r] : "?",
-                 esp_netif_get_netif_impl_index(backbone_netif()));
+        if (say) {
+            char lib[12] = "?";
+            if (s_library_idx >= 0) {
+                snprintf(lib, sizeof(lib), "%d", s_library_idx);
+            }
+            ESP_LOGI(TAG, "alive: link=%s heap=%" PRIu32 " br=%s role=%s netif_idx=%d library_idx=%s",
+                     backbone_is_up() ? "up" : "down", esp_get_free_heap_size(),
+                     (brs < 4) ? br_state[brs] : "?", (r < 5) ? role[r] : "?",
+                     esp_netif_get_netif_impl_index(backbone_netif()), lib);
+        }
 
         /* Report the mesh-side addresses once routing is live. OpenThread
          * tells us which prefix is the favored OMR prefix and marks its own
@@ -614,9 +628,20 @@ void app_main(void)
             otInstance *di = esp_openthread_get_instance();
             char probe[200];
             int n = 0;
+            /* Only NONE identifies the library's index.  Before
+             * border_router_init_task has initialised the library, every
+             * index answers INVALID_STATE (infra_if.cpp checks that first),
+             * which is not INVALID_ARGS either and would record index 0. */
+            int found = -1;
             for (uint32_t idx = 0; idx <= 20 && n < (int)sizeof(probe) - 8; idx++) {
-                n += snprintf(&probe[n], sizeof(probe) - n, "%" PRIu32 ":%d ",
-                              idx, (int)otPlatInfraIfStateChanged(di, idx, true));
+                otError pe = otPlatInfraIfStateChanged(di, idx, true);
+                if (found < 0 && pe == OT_ERROR_NONE) {
+                    found = (int)idx;
+                }
+                n += snprintf(&probe[n], sizeof(probe) - n, "%" PRIu32 ":%d ", idx, (int)pe);
+            }
+            if (found >= 0) {
+                s_library_idx = found;
             }
             otIp6Prefix pfx;
             int e_onlink = (int)otBorderRoutingGetOnLinkPrefix(di, &pfx);

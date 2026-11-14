@@ -4,6 +4,107 @@ Versions follow the Home Assistant style, `year.month.release`. The firmware
 that ships with each release carries its own number, shown on the add-on's page
 next to the one installed on the stick.
 
+## 2026.10.46
+
+Firmware 0.1.60. Corrections, most of them prompted by #2: log lines that
+reported faults where there were none, a wrong value in the border router's
+properties, and two passages of documentation.
+
+- **The setup no longer says Matter devices are commissioned "as usual".**
+  Commission them from the Matter server's own web page, not from a phone:
+  the Thread network is reachable only from the machine the stick is plugged
+  into, and a phone on the LAN has no route into it. On Home Assistant OS the
+  Android Companion app stopped at "Checking Thread network connectivity",
+  while the Matter server commissioned the same devices (#2, reported by
+  @giotanzi).
+- **The log no longer says the host cannot learn the route into the mesh.**
+  Where `accept_ra` and `accept_ra_rt_info_max_plen` cannot be set on `tap0`,
+  the kernel does not take the route from the border router's advertisement,
+  and the container installs it by hand; the messages said the host would not
+  learn the route at all. As a Home Assistant add-on, which cannot change those
+  settings, the line is now a plain note instead of a warning asking for a
+  `compose.yaml` volume (#2, reported by @giotanzi).
+- **Firmware: only the OMR address is labelled reachable from the host.** The
+  check still compared against the mesh-local prefix of the old built-in
+  network, so since every stick creates its own network (firmware 0.1.44) the
+  RLOC, ALOC and ML-EID addresses carried `<-- OMR, reachable from the host`
+  as well.
+- **Firmware: the heartbeat shows both interface indices.** Its `infra_idx`
+  was the backbone interface's index, not the one the border-router library
+  uses, and read as "no mismatch" next to the `MISMATCH` line at start. It is
+  now `netif_idx=… library_idx=…`.
+- **Firmware: `/get_properties` reports the mesh-local prefix correctly.** It
+  copied 17 bytes out of the 8-byte prefix and showed something like
+  `fd8f:4fc3:46f6:0:fe80:0:0:0:8ce0/140`. The component THBR builds against now
+  carries the fix by @romanstanek (espressif/esp-thread-br#221). Neither THBR
+  nor Home Assistant reads that field.
+- **The FHEM walkthrough no longer announces example modules.** They left the
+  repository in August; its introduction still said two were part of it. The
+  walkthrough ends where FHEM begins and names the FHEM module it was tested
+  with.
+
+## 2026.10.45
+
+Firmware 0.1.57, unchanged. On Home Assistant OS the add-on now does the one
+setup step that the settings page cannot.
+
+- **On Home Assistant OS the add-on puts `tap0` among Home Assistant's
+  network adapters itself.** Home Assistant answers mDNS only on the adapters
+  its settings name, and the setup asked for `tap0` to be added on the
+  *Network* settings page. On Home Assistant OS that page never offers it: it
+  lists only the interfaces NetworkManager manages, and a tap is not one of
+  them. The step could not be done, and the Thread panel stayed empty (#2,
+  reported by @giotanzi). The add-on now sets the list through Home
+  Assistant's API — next to the adapters already in use, removing none — and
+  posts a notification asking for the one restart that makes it count. It
+  asks the same when Home Assistant came up before `tap0` existed. For this
+  the add-on has access to Home Assistant's API (`homeassistant_api`).
+  Verified on Home Assistant OS 18.2 with Core 2026.9.0: starting from the
+  automatic choice, the add-on set the list five seconds after the stick
+  answered, and after one restart Home Assistant discovered the border router
+  on `tap0`.
+
+## 2026.9.44
+
+Firmware 0.1.57. A Bluetooth fix contributed from outside, and a change to how
+the firmware is built, so that the build can be reproduced.
+
+- **Devices that pad their advertisement with zeroes are found.** Some
+  peripherals fill the unused rest of the 31-byte advertising buffer with zero
+  bytes. NimBLE's parser rejects a field whose length is zero as bad data and
+  throws the whole advertisement away with it, so the Bluetooth proxy never
+  reported the device and commissioning could not find it. The proxy now
+  treats the first zero-length field as the end of the data before parsing.
+  Contributed by @Flachzange (#1), who commissioned an ELTAKO ESR64NP-IPM
+  through the proxy with it. Reproduced on the bench with a stand-in that
+  advertises the same shape — 15 bytes of flags and Matter service data, the
+  rest of the buffer zeroes: in 90 seconds the firmware before the fix
+  reported it 76 times and never with its service data, because only the scan
+  response survived parsing; with the fix the service data arrives, 77 times
+  in the same window.
+- **The border router component is pinned to a fork.** The `/diagnostics`
+  handler that 2026.9.43 fixed lives in `esp_ot_br_server`, a dependency
+  resolved at build time — and the fix existed only as a local edit to the
+  resolved copy, which is generated and ignored by git. A fresh checkout, or
+  any re-resolve of the dependency, would have rebuilt the leak without
+  saying a word. `main/idf_component.yml` now pins the dependency to a fork
+  carrying the fix, by commit, so a checkout resolves the component this
+  release was built from. Verified: with the pin, the component
+  resolves byte-identical to the tree 0.1.56 was built from, and the
+  diagnostics functions disassemble to the same instructions as the shipped
+  firmware.
+- The fix has been submitted upstream (espressif/esp-thread-br#219). Once it
+  lands there, the fork can go.
+- `scripts/release_check.sh` now also asks whether the build is still
+  reproducible: whether every git dependency names a version, whether the
+  manifest and the lock agree, whether the fix is still present in the
+  resolved tree, and whether anybody has edited a resolved component by hand.
+- The leak fix was re-verified by aborting `/diagnostics` from the client
+  side 1200 times against the patched build, at four points: before the first
+  byte, after the first chunk, after several chunks, and in the middle of a
+  chunk. The idle heap's allocated block count is unchanged at every one of
+  them, and the HTTP server task retains nothing.
+
 ## 2026.9.43
 
 Firmware 0.1.56. The follow-up to 2026.9.42: the diagnostics walk no longer
