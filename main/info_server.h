@@ -17,6 +17,10 @@
 
 /* Start the server on CONFIG_THBR_INFO_PORT.  Call once the backbone netif
  * exists; the handlers answer from then on, whatever the border router does. */
+/* Capture reset reason and update the persistent boot counter after NVS init.
+ * A diagnostic NVS write failure is logged, never fatal. */
+void info_server_init_boot_diagnostics(void);
+
 esp_err_t info_server_start(void);
 
 /*   GET /backbone  {"omr_prefix":"fd6a:…:1::/64","onlink_prefix":"…","ll":"fe80::…"}
